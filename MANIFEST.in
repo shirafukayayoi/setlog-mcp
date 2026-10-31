@@ -1,0 +1,9 @@
+include LICENSE README.md SECURITY.md CONTRIBUTING.md pyproject.toml
+recursive-include src/setlog_mcp *.py
+recursive-include tests *.py
+prune .venv
+prune .session
+prune analysis
+prune source
+prune validation
+global-exclude *.py[cod] *.bin *.enc *.apk *.xapk *.dex *.arsc *.mp4 *.mov *.log
