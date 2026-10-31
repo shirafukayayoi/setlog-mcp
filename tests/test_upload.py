@@ -65,6 +65,7 @@ def test_upload_and_readback_without_leaking_authentication(prepared, monkeypatc
     identifier, message, encrypted, room, user, private = prepared
     calls = []
     put_requests = []
+    monkeypatch.setattr(upload.time, "time", lambda: 1800000000)
 
     def api(method, path, body=None, token=None, **kwargs):
         calls.append((method, path, body))
@@ -85,6 +86,7 @@ def test_upload_and_readback_without_leaking_authentication(prepared, monkeypatc
         if method == "POST":
             assert body["media"]["path"] == "stored-key"
             assert body["messageId"] == identifier
+            assert body["clientTimestamp"] == 1800000000000
             return {"messageId": identifier}
         # APKが受け付けている、mediaが番号付きオブジェクトの応答形式も検証する。
         return {

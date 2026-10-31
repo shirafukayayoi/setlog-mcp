@@ -29,6 +29,10 @@ class SetlogError(Exception):
     """機密情報を含めず利用者へ表示できるエラー。"""
 
 
+class StateBusyError(SetlogError):
+    """同じ保存先への別の書き込みが進行している。"""
+
+
 class _Blob(ctypes.Structure):
     _fields_ = [("size", wintypes.DWORD), ("data", ctypes.POINTER(ctypes.c_ubyte))]
 
@@ -90,7 +94,7 @@ def private_path(name: str) -> Path:
 def operation_lock():
     """複数のMCPクライアントから同じ状態へ同時に書き込まない。"""
     if not _WRITE_LOCK.acquire(blocking=False):
-        raise SetlogError("別の書き込み処理が実行中です。完了後に状態を確認してください。")
+        raise StateBusyError("別の書き込み処理が実行中です。完了後に状態を確認してください。")
     stream = None
     locked = False
     try:
@@ -111,7 +115,7 @@ def operation_lock():
                 fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             locked = True
         except OSError:
-            raise SetlogError(
+            raise StateBusyError(
                 "同じ保存先を別のプロセスが使用中です。状態を確認してから再操作してください。"
             ) from None
         yield

@@ -331,6 +331,8 @@ def send(identifier: str) -> dict:
         job["phase"] = "uploaded"
         client.save_private(f"job-{identifier}.bin", job)
     # 投稿開始を先に保存し、応答が失われた場合にも二重投稿しない。
+    # 予約・長期保存した準備データも、実行時の日時で投稿する。
+    job["message"]["clientTimestamp"] = int(time.time() * 1000)
     job["phase"] = "publishing"
     client.save_private(f"job-{identifier}.bin", job)
     result = client.api("POST", f"chat/{job['collection']}/message", job["message"], token=session["token"])
@@ -370,8 +372,10 @@ def main() -> int:
             with client.operation_lock():
                 result = prepare(args.video, args.collection, args.comment)
         elif args.command == "send":
+            from .posting import send_one
+
             with client.operation_lock():
-                result = send(args.job_id)
+                result = send_one(args.job_id)
         else:
             with client.operation_lock():
                 result = verify_job(args.job_id)
