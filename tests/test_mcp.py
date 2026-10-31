@@ -34,6 +34,30 @@ async def test_tool_schema_and_annotations():
         assert mapping["send_prepared_video"].annotations.readOnlyHint is False
         assert "job_id" in mapping["send_prepared_video"].inputSchema["properties"]
         assert "video_path" in mapping["prepare_video"].inputSchema["properties"]
+        assert mapping["prepare_video"].inputSchema["properties"]["comment"]["default"] == ""
+        assert "comment" not in mapping["prepare_video"].inputSchema["required"]
+
+
+@pytest.mark.anyio
+async def test_prepare_tool_passes_comment_and_returns_preview(monkeypatch, tmp_path):
+    captured = []
+
+    def prepare(path, collection_id, comment):
+        captured.append((path, collection_id, comment))
+        return {"準備ID": "synthetic-job", "コメント": comment}
+
+    monkeypatch.setattr(server.upload, "prepare", prepare)
+    video = str(tmp_path / "clip.mp4")
+    comment = "今日の記録\n😀"
+    async with create_connected_server_and_client_session(server.mcp) as session:
+        result = await session.call_tool(
+            "prepare_video", {"video_path": video, "collection_id": "room", "comment": comment}
+        )
+        assert result.isError is False
+        assert result.structuredContent["コメント"] == comment
+        assert [(str(path), collection, text) for path, collection, text in captured] == [
+            (video, "room", comment)
+        ]
 
 
 @pytest.mark.anyio

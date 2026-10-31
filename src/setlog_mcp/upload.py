@@ -116,7 +116,15 @@ def probe_video(path: Path) -> dict:
 
 
 def make_message(
-    room: dict, user: dict, identity: bytes, video: bytes, metadata: dict, message_id: str, timestamp: int
+    room: dict,
+    user: dict,
+    identity: bytes,
+    video: bytes,
+    metadata: dict,
+    message_id: str,
+    timestamp: int,
+    *,
+    comment: str = "",
 ) -> tuple[dict, bytes]:
     content_key = os.urandom(32)
     aad = crypto.media_aad(room["id"], message_id, user["userId"], metadata["mime"], 2)
@@ -135,6 +143,9 @@ def make_message(
     country = config.capture_country()
     if country is not None:
         media["captureCountryCode"] = country
+    if comment.strip():
+        # setlog標準のキャプションとして添え、動画への焼き込みは行わない。
+        media["captions"] = [{"text": comment, "time": "", "translation": "{0, 0}", "style": 0}]
     message = {
         "type": "collection",
         "conversationId": room["id"],
@@ -150,7 +161,7 @@ def make_message(
     return message, encrypted
 
 
-def prepare(path: Path, collection_id: str) -> dict:
+def prepare(path: Path, collection_id: str, comment: str = "") -> dict:
     path = path.expanduser().resolve(strict=True)
     if not path.is_file() or path.suffix.lower() != ".mp4":
         raise client.SetlogError("通常のMP4ファイルを指定してください。")
@@ -176,7 +187,9 @@ def prepare(path: Path, collection_id: str) -> dict:
         raise client.SetlogError("動画ファイルが空です。")
     identifier = str(uuid.uuid4())
     timestamp = int(time.time() * 1000)
-    message, encrypted = make_message(room, user, private, video, metadata, identifier, timestamp)
+    message, encrypted = make_message(
+        room, user, private, video, metadata, identifier, timestamp, comment=comment
+    )
     encrypted_name = f"video-{identifier}.enc"
     (client.STATE / encrypted_name).write_bytes(encrypted)
     job = {
@@ -193,7 +206,7 @@ def prepare(path: Path, collection_id: str) -> dict:
         "recipientKeys": recipient_keys(room, user),
     }
     client.save_private(f"job-{identifier}.bin", job)
-    return {
+    preview = {
         "準備ID": identifier,
         "投稿先": room.get("name"),
         "受信者数": len(job["recipientKeys"]),
@@ -201,6 +214,9 @@ def prepare(path: Path, collection_id: str) -> dict:
         "動画情報": metadata,
         "状態": "暗号化済み。まだアップロード・投稿していません。",
     }
+    if "captions" in message["media"]:
+        preview["コメント"] = comment
+    return preview
 
 
 def load_job(identifier: str) -> dict:
@@ -241,14 +257,29 @@ def verify_job(identifier: str) -> dict:
         "message"
     ]["mediaCipherV"]:
         raise client.SetlogError("読み戻した投稿の送信者または暗号化形式が一致しません。")
+    expected_captions = job["message"]["media"].get("captions")
+    if expected_captions:
+        returned_captions = media.get("captions")
+        if (
+            not isinstance(returned_captions, list)
+            or any(not isinstance(caption, dict) for caption in returned_captions)
+            or [caption.get("text") for caption in returned_captions]
+            != [caption["text"] for caption in expected_captions]
+        ):
+            raise client.SetlogError(
+                "読み戻した投稿のコメントが準備した本文と一致しません。再送せず確認してください。"
+            )
     job["phase"] = "verified"
     client.save_private(f"job-{identifier}.bin", job)
-    return {
+    verified = {
         "準備ID": identifier,
         "投稿先": job["collectionName"],
         "投稿ID": message_id,
         "状態": "投稿を読み戻し、動画の保存先の一致を確認しました。アプリ内再生は別途確認が必要です。",
     }
+    if expected_captions:
+        verified["コメント"] = expected_captions[0]["text"]
+    return verified
 
 
 def send(identifier: str) -> dict:
@@ -318,6 +349,9 @@ def main() -> int:
     prepare_parser = commands.add_parser("prepare", help="動画を暗号化し、送信せずに準備する")
     prepare_parser.add_argument("video", type=Path)
     prepare_parser.add_argument("--collection", required=True)
+    prepare_parser.add_argument(
+        "--comment", default="", help="動画に添えるコメント。改行・絵文字も指定できる"
+    )
     for name in ("send", "verify"):
         command = commands.add_parser(name)
         command.add_argument("job_id")
@@ -334,7 +368,7 @@ def main() -> int:
             ]
         elif args.command == "prepare":
             with client.operation_lock():
-                result = prepare(args.video, args.collection)
+                result = prepare(args.video, args.collection, args.comment)
         elif args.command == "send":
             with client.operation_lock():
                 result = send(args.job_id)
